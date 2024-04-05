@@ -23,4 +23,4 @@ Before you start this project, please ensure that you understand the basic conce
 
 Socket is the interface between the application layer and transmission layer
 
-![./docs/assets/socket_description.png]
+![Graph of socket programming](./docs/assets/socket_description.png)
