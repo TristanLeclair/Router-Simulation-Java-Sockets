@@ -2,8 +2,10 @@ package socs.network.node;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import socs.network.util.Configuration;
+import java.util.Arrays;
+import java.util.Optional;
 
+import socs.network.util.Configuration;
 
 public class Router {
 
@@ -11,8 +13,8 @@ public class Router {
 
   RouterDescription rd = new RouterDescription();
 
-  //assuming that all routers are with 4 ports
-  Link[] ports = new Link[4];
+  // assuming that all routers are with 4 ports
+  LinkDB ports = new LinkDB(4);
 
   public Router(Configuration config) {
     rd.simulatedIPAddress = config.getString("socs.network.router.ip");
@@ -22,7 +24,7 @@ public class Router {
   /**
    * output the shortest path to the given destination ip
    * <p/>
-   * format: source ip address  -> ip address -> ... -> destination ip
+   * format: source ip address -> ip address -> ... -> destination ip
    *
    * @param destinationIP the ip adderss of the destination simulated router
    */
@@ -38,25 +40,35 @@ public class Router {
    * @param portNumber the port number which the link attaches at
    */
   private void processDisconnect(short portNumber) {
-
+    if (!ports.removeLink(portNumber)) {
+      return;
+    }
+    // TODO: resync lsd
   }
 
   /**
-   * attach the link to the remote router, which is identified by the given simulated ip;
-   * to establish the connection via socket, you need to indentify the process IP and process Port;
+   * attach the link to the remote router, which is identified by the given
+   * simulated ip;
+   * to establish the connection via socket, you need to indentify the process IP
+   * and process Port;
    * <p/>
    * NOTE: this command should not trigger link database synchronization
    */
   private void processAttach(String processIP, short processPort,
-                             String simulatedIP) {
+      String simulatedIP) {
+    // TODO: establish link without sync
 
+    boolean successfullyAdded = ports.addLink(processIP, processPort, simulatedIP, rd);
+    // TODO: figure out if we need to do something if router is full (think we
+    // print)
   }
-
 
   /**
    * process request from the remote router.
-   * For example: when router2 tries to attach router1. Router1 can decide whether it will accept this request.
-   * The intuition is that if router2 is an unknown/anomaly router, it is always safe to reject the attached request from router2.
+   * For example: when router2 tries to attach router1. Router1 can decide whether
+   * it will accept this request.
+   * The intuition is that if router2 is an unknown/anomaly router, it is always
+   * safe to reject the attached request from router2.
    */
   private void requestHandler() {
 
@@ -66,17 +78,19 @@ public class Router {
    * broadcast Hello to neighbors
    */
   private void processStart() {
-
+    // TODO: establish link without sync
   }
 
   /**
-   * attach the link to the remote router, which is identified by the given simulated ip;
-   * to establish the connection via socket, you need to indentify the process IP and process Port;
+   * attach the link to the remote router, which is identified by the given
+   * simulated ip;
+   * to establish the connection via socket, you need to indentify the process IP
+   * and process Port;
    * <p/>
    * This command does trigger the link database synchronization
    */
   private void processConnect(String processIP, short processPort,
-                              String simulatedIP) {
+      String simulatedIP) {
 
   }
 
@@ -84,11 +98,7 @@ public class Router {
    * output the neighbors of the routers
    */
   private void processNeighbors() {
-    StringBuilder sb = new StringBuilder();
-    for (Link link : ports) {
-      sb.append(link.router2.simulatedIPAddress).append(System.getProperty("line.separator"));
-    }
-    System.out.println(sb);
+    System.out.println(ports.toString());
   }
 
   /**
@@ -124,10 +134,10 @@ public class Router {
           processConnect(cmdLine[1], Short.parseShort(cmdLine[2]),
               cmdLine[3]);
         } else if (command.equals("neighbors")) {
-          //output neighbors
+          // output neighbors
           processNeighbors();
         } else {
-          //invalid command
+          // invalid command
           break;
         }
         System.out.print(">> ");
