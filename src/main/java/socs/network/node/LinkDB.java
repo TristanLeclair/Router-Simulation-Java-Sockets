@@ -69,4 +69,14 @@ public class LinkDB {
   public Optional<Link> findLink(short portNumber) {
     return Arrays.stream(links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
   }
+
+  @Override
+  public String toString() {
+    StringBuilder sb = new StringBuilder();
+    for (Link link : links) {
+      sb.append(link.router2.simulatedIPAddress).append(System.getProperty("line.separator"));
+    }
+    return sb.toString();
+  }
+
 }
