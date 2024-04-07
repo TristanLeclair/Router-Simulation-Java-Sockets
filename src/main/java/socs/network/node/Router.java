@@ -1,9 +1,8 @@
 package socs.network.node;
 
-import socs.network.util.Configuration;
-
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import socs.network.util.Configuration;
 
 
 public class Router {
@@ -54,8 +53,8 @@ public class Router {
 
 
   /**
-   * process request from the remote router. 
-   * For example: when router2 tries to attach router1. Router1 can decide whether it will accept this request. 
+   * process request from the remote router.
+   * For example: when router2 tries to attach router1. Router1 can decide whether it will accept this request.
    * The intuition is that if router2 is an unknown/anomaly router, it is always safe to reject the attached request from router2.
    */
   private void requestHandler() {
@@ -84,7 +83,11 @@ public class Router {
    * output the neighbors of the routers
    */
   private void processNeighbors() {
-
+    StringBuilder sb = new StringBuilder();
+    for (Link link : ports) {
+      sb.append(link.router2.simulatedIPAddress).append(System.getProperty("line.separator"));
+    }
+    System.out.println(sb);
   }
 
   /**
@@ -112,13 +115,13 @@ public class Router {
         } else if (command.startsWith("attach ")) {
           String[] cmdLine = command.split(" ");
           processAttach(cmdLine[1], Short.parseShort(cmdLine[2]),
-                  cmdLine[3] );
+              cmdLine[3]);
         } else if (command.equals("start")) {
           processStart();
         } else if (command.equals("connect ")) {
           String[] cmdLine = command.split(" ");
           processConnect(cmdLine[1], Short.parseShort(cmdLine[2]),
-                  cmdLine[3]);
+              cmdLine[3]);
         } else if (command.equals("neighbors")) {
           //output neighbors
           processNeighbors();
