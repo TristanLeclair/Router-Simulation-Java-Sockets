@@ -45,6 +45,7 @@ public class Router {
       return;
     }
     // TODO: resync lsd
+    // also remove thread from pool (that will eventually exist)
   }
 
   /**
@@ -58,10 +59,16 @@ public class Router {
   private void processAttach(String processIP, short processPort,
       String simulatedIP) {
     // TODO: establish link without sync
+    if (!requestHandler()) {
+      return;
+    }
 
     boolean successfullyAdded = ports.addLink(processIP, processPort, simulatedIP, rd);
-    // TODO: figure out if we need to do something if router is full (think we
-    // print)
+    if (!successfullyAdded) {
+      System.out.println("Error adding link to router");
+      // TODO: figure out if we need to do something if router is full (think we
+      // print)
+    }
   }
 
   /**
