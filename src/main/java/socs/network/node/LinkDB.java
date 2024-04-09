@@ -28,6 +28,10 @@ public class LinkDB {
     return addLink(newLink);
   }
 
+  public boolean canAddLink() {
+    return currentSize < _maxSize;
+  }
+
   /**
    * @param link to add to list
    * @return true if link added
