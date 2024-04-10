@@ -3,7 +3,6 @@ package socs.network.node;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.Arrays;
-import java.util.Scanner;
 
 import socs.network.util.Configuration;
 
@@ -13,6 +12,8 @@ public class Router {
 
   RouterDescription rd = new RouterDescription();
 
+  ServerThread serverSocket;
+
   // assuming that all routers are with 4 ports
   LinkDB ports = new LinkDB(4);
 
@@ -21,6 +22,13 @@ public class Router {
   public Router(Configuration config) {
     rd.simulatedIPAddress = config.getString("socs.network.router.ip");
     lsd = new LinkStateDatabase(rd);
+    try {
+      serverSocket = new ServerThread(Integer.parseInt(config.getString("socs.network.router.port")));
+      serverSocket.start();
+    } catch (NumberFormatException e) {
+      e.printStackTrace();
+      System.exit(-1);
+    }
   }
 
   public void terminal() {
