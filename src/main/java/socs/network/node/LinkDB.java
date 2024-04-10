@@ -76,8 +76,15 @@ public class LinkDB {
 
   @Override
   public String toString() {
+    if (currentSize == 0) {
+      return "Router has no current neighbors";
+    }
+
     StringBuilder sb = new StringBuilder();
     for (Link link : links) {
+      if (link == null) {
+        continue;
+      }
       sb.append(link.router2.simulatedIPAddress).append(System.getProperty("line.separator"));
     }
     return sb.toString();
