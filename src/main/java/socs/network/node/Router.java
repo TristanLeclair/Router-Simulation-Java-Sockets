@@ -2,8 +2,6 @@ package socs.network.node;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.util.Arrays;
-import java.util.Optional;
 import java.util.Scanner;
 
 import socs.network.util.Configuration;
@@ -158,6 +156,7 @@ public class Router {
           processDisconnect(Short.parseShort(cmdLine[1]));
         } else if (command.startsWith("quit")) {
           processQuit();
+          break;
         } else if (command.startsWith("attach ")) {
           String[] cmdLine = command.split(" ");
           processAttach(cmdLine[1], Short.parseShort(cmdLine[2]),
@@ -173,7 +172,10 @@ public class Router {
           processNeighbors();
         } else {
           // invalid command
-          break;
+          System.out.println("Invalid command, please select one of: " + getCommands());
+          // NOTE: i dont think we break here, we'll just keep prompting, at least for
+          // testing purposes i think it works better
+          // break;
         }
         System.out.print(">> ");
         command = br.readLine();
@@ -183,6 +185,24 @@ public class Router {
     } catch (Exception e) {
       e.printStackTrace();
     }
+  }
+
+  private String[] _commands = null;
+
+  private String[] getCommands() {
+    if (_commands != null) {
+      return _commands;
+    }
+
+    _commands = new String[] {
+        "`attach [Process IP] [Process Port] [IP Address]`",
+        "`connect [Process IP] [Process Port] [IP Address]`",
+        "`disconnect [Port Number]`",
+        "`detect [IP Address]`",
+        "`neighbors`",
+        "`quit`",
+    };
+    return _commands;
   }
 
 }
