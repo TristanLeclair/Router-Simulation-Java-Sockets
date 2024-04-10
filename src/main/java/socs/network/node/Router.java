@@ -2,6 +2,7 @@ package socs.network.node;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.Arrays;
 import java.util.Scanner;
 
 import socs.network.util.Configuration;
@@ -172,7 +173,8 @@ public class Router {
           processNeighbors();
         } else {
           // invalid command
-          System.out.println("Invalid command, please select one of: " + getCommands());
+          System.out.println("Invalid command, please select one of: ");
+          System.out.println(getCommands());
           // NOTE: i dont think we break here, we'll just keep prompting, at least for
           // testing purposes i think it works better
           // break;
@@ -187,14 +189,14 @@ public class Router {
     }
   }
 
-  private String[] _commands = null;
+  private String _commands = null;
 
-  private String[] getCommands() {
+  private String getCommands() {
     if (_commands != null) {
       return _commands;
     }
 
-    _commands = new String[] {
+    String[] commands = new String[] {
         "`attach [Process IP] [Process Port] [IP Address]`",
         "`connect [Process IP] [Process Port] [IP Address]`",
         "`disconnect [Port Number]`",
@@ -202,6 +204,10 @@ public class Router {
         "`neighbors`",
         "`quit`",
     };
+    StringBuilder sb = new StringBuilder();
+    Arrays.stream(commands).forEach(x -> sb.append("- ").append(x).append(System.getProperty("line.separator")));
+    _commands = sb.toString();
+
     return _commands;
   }
 
