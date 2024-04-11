@@ -114,4 +114,8 @@ public class LinkDB {
     return sb.toString();
   }
 
+  public Link[] getLinks() {
+    return links;
+  }
+
 }
