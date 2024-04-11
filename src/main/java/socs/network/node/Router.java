@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Arrays;
@@ -28,7 +29,7 @@ public class Router {
 
         while (!serverSocket.isClosed()) {
           Socket socket = serverSocket.accept();
-          new ClientHandler(socket);
+          new ClientHandler(socket).start();
         }
       } catch (IOException ex) {
         System.err.println("Server exception: " + ex.getMessage());
@@ -40,7 +41,7 @@ public class Router {
   }
 
   private class ClientHandler extends Thread {
-    private Socket socket;
+    private final Socket socket;
 
     public ClientHandler(Socket socket) {
       this.socket = socket;
@@ -50,10 +51,11 @@ public class Router {
     public void run() {
       try {
         ObjectInputStream inFromClient = new ObjectInputStream(socket.getInputStream());
+        ObjectOutputStream outToClient = new ObjectOutputStream(socket.getOutputStream());
         SOSPFPacket packet = (SOSPFPacket) inFromClient.readObject();
 
         if (packet.sospfType == 0) {
-          processHello(packet);
+          processHello(packet, inFromClient, outToClient);
         } else if (packet.sospfType == 1) {
           processLSAUpdate(packet);
         }
@@ -64,31 +66,54 @@ public class Router {
         System.err.println("Server exception: " + ex.getMessage());
         ex.printStackTrace();
         System.exit(0);
+      } finally {
+        try {
+          socket.close();
+        } catch (IOException e) {
+          System.err.println("Failed to close socket: " + e.getMessage());
+        }
       }
     }
 
-    private void processHello(SOSPFPacket packet) throws IOException {
-      System.out.println(String.format("received HELLO from %s;", packet.neighborID));
+    private void processHello(SOSPFPacket packet, ObjectInputStream in, ObjectOutputStream out)
+        throws IOException, ClassNotFoundException {
+      printRecHello(packet);
 
       Optional<Link> link = ports.findLink(packet.srcProcessPort);
-      if (link.isEmpty()) {
-        if (ports.addLink(packet.srcIP, packet.srcProcessPort, packet.neighborID, rd)) {
-          System.out.println(String.format("set %s STATE to INIT"));
-        }
-      } else {
-        if (ports.setLinkToTwoWay(packet.srcProcessPort)) {
-          System.out.println(String.format("set %s STATE to TWO_WAY"));
-        }
+      if (link.isPresent()) {
+        return;
       }
+
+      if (!ports.addLink(packet.srcIP, packet.srcProcessPort, packet.neighborID, rd)) {
+        return;
+      }
+      printSetState(packet, RouterStatus.INIT);
+
+      SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
+          packet.neighborID, rd.simulatedIPAddress);
+      out.writeObject(hello);
+      out.flush();
+
+      SOSPFPacket handshake = (SOSPFPacket) in.readObject();
+      printRecHello(handshake);
+
+      if (!ports.setLinkToTwoWay(packet.srcProcessPort)) {
+        System.out.println("Error");
+        System.exit(1);
+      }
+      printSetState(packet, RouterStatus.TWO_WAY);
+    }
+
+    private void printSetState(SOSPFPacket packet, RouterStatus status) {
+      System.out.printf("set %s STATE to %s%n", packet.neighborID, status.toString());
+    }
+
+    private void printRecHello(SOSPFPacket packet) {
+      System.out.printf("received HELLO from %s;%n", packet.neighborID);
     }
 
     // TODO: complete
     private void processLSAUpdate(SOSPFPacket packet) throws IOException {
-      quitThread();
-    }
-
-    private void quitThread() throws IOException {
-      socket.close();
     }
   }
 
@@ -191,7 +216,7 @@ public class Router {
    * NOTE: this command should not trigger link database synchronization
    */
   private void processAttach(String processIP, short processPort,
-      String simulatedIP) {
+                             String simulatedIP) {
     // TODO: establish link without sync
     if (!requestHandler()) {
       System.out.println("Router full");
@@ -269,7 +294,7 @@ public class Router {
    * This command does trigger the link database synchronization
    */
   private void processConnect(String processIP, short processPort,
-      String simulatedIP) {
+                              String simulatedIP) {
 
   }
 
@@ -301,7 +326,8 @@ public class Router {
         "`quit`",
     };
     StringBuilder sb = new StringBuilder();
-    Arrays.stream(commands).forEach(x -> sb.append("- ").append(x).append(System.getProperty("line.separator")));
+    Arrays.stream(commands)
+        .forEach(x -> sb.append("- ").append(x).append(System.getProperty("line.separator")));
     _commands = sb.toString();
 
     return _commands;
