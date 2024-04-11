@@ -9,7 +9,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Arrays;
 import java.util.Optional;
+import java.util.Vector;
 
+import socs.network.message.LSA;
 import socs.network.message.SOSPFPacket;
 import socs.network.util.Configuration;
 
@@ -112,8 +114,48 @@ public class Router {
       System.out.printf("received HELLO from %s;%n", packet.neighborID);
     }
 
-    // TODO: complete
     private void processLSAUpdate(SOSPFPacket packet) throws IOException {
+      System.out.println("Received LSA update");
+      for (LSA lsa : packet.lsaArray) {
+        // Check if the LSA is from rd
+        if (lsa.linkStateID.equals(rd.simulatedIPAddress)) {
+          lsa.lsaSeqNumber++;
+        }
+        // Update the link state database
+        lsd.syncLinkStateDatabase(lsa);
+      }
+
+      // Synchronize on links from LinkDB?????
+
+      // Send LSA update to neighbors
+      for (Link link : ports.getLinks()) {
+        // Don't send to the neighbor that sent the LSA
+        if (link.router2.simulatedIPAddress.equals(packet.srcIP)) {
+          continue;
+        }
+        SOSPFPacket lsaUpdate = new SOSPFPacket();
+        lsaUpdate.srcProcessIP = rd.simulatedIPAddress;
+        lsaUpdate.srcProcessPort = rd.processPortNumber;
+        lsaUpdate.srcIP = rd.simulatedIPAddress;
+        lsaUpdate.dstIP = link.router2.simulatedIPAddress;
+        lsaUpdate.sospfType = 1;
+        lsaUpdate.routerID = rd.simulatedIPAddress;
+        lsaUpdate.neighborID = link.router2.simulatedIPAddress;
+        // Add all LSAs from the DB to the packet Vector
+        lsaUpdate.lsaArray = new Vector<>();
+        for (LSA lsa : lsd._store.values()) {
+          lsaUpdate.lsaArray.add(lsa);
+        }
+
+        try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
+            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
+          out.writeObject(lsaUpdate);
+          out.flush();
+        } catch (IOException e) {
+          System.err.println("Failed to send LSA update to " + link.router2.simulatedIPAddress);
+          e.printStackTrace();
+        }
+      }
     }
   }
 
