@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class LinkDB implements Iterable<Link> {
   private final Link[] _links;
@@ -14,6 +15,12 @@ public class LinkDB implements Iterable<Link> {
   }
 
   private int currentSize;
+
+  public AtomicInteger getLsaSeqNumber() {
+    return lsaSeqNumber;
+  }
+
+  private AtomicInteger lsaSeqNumber = new AtomicInteger(Integer.MIN_VALUE);
 
   /**
    * @param size max size of DB
@@ -42,6 +49,7 @@ public class LinkDB implements Iterable<Link> {
     newRouter.status = RouterStatus.INIT;
 
     Link newLink = new Link(currentRouter, newRouter);
+    lsaSeqNumber.addAndGet(1);
 
     return addLink(newLink);
   }
