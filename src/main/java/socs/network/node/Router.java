@@ -1,12 +1,96 @@
 package socs.network.node;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.Arrays;
+import java.util.Optional;
 
+import socs.network.message.SOSPFPacket;
 import socs.network.util.Configuration;
 
 public class Router {
+
+  private class ServerThread extends Thread {
+    private short port;
+
+    public ServerThread(short port) {
+      this.port = port;
+    }
+
+    @Override
+    public void run() {
+      try (ServerSocket serverSocket = new ServerSocket(port)) {
+        System.out.println("Server listening on port " + port);
+
+        while (!serverSocket.isClosed()) {
+          Socket socket = serverSocket.accept();
+          new ClientHandler(socket);
+        }
+      } catch (IOException ex) {
+        System.err.println("Server exception: " + ex.getMessage());
+        ex.printStackTrace();
+        System.exit(0);
+      }
+    }
+
+  }
+
+  private class ClientHandler extends Thread {
+    private Socket socket;
+
+    public ClientHandler(Socket socket) {
+      this.socket = socket;
+    }
+
+    @Override
+    public void run() {
+      try {
+        ObjectInputStream inFromClient = new ObjectInputStream(socket.getInputStream());
+        SOSPFPacket packet = (SOSPFPacket) inFromClient.readObject();
+
+        if (packet.sospfType == 0) {
+          processHello(packet);
+        } else if (packet.sospfType == 1) {
+          processLSAUpdate(packet);
+        }
+
+        socket.close();
+
+      } catch (IOException | ClassNotFoundException ex) {
+        System.err.println("Server exception: " + ex.getMessage());
+        ex.printStackTrace();
+        System.exit(0);
+      }
+    }
+
+    private void processHello(SOSPFPacket packet) throws IOException {
+      System.out.println(String.format("received HELLO from %s;", packet.neighborID));
+
+      Optional<Link> link = ports.findLink(packet.srcProcessPort);
+      if (link.isEmpty()) {
+        if (ports.addLink(packet.srcIP, packet.srcProcessPort, packet.neighborID, rd)) {
+          System.out.println(String.format("set %s STATE to INIT"));
+        }
+      } else {
+        if (ports.setLinkToTwoWay(packet.srcProcessPort)) {
+          System.out.println(String.format("set %s STATE to TWO_WAY"));
+        }
+      }
+    }
+
+    // TODO: complete
+    private void processLSAUpdate(SOSPFPacket packet) throws IOException {
+      quitThread();
+    }
+
+    private void quitThread() throws IOException {
+      socket.close();
+    }
+  }
 
   protected LinkStateDatabase lsd;
 
@@ -21,14 +105,8 @@ public class Router {
 
   public Router(Configuration config) {
     rd.simulatedIPAddress = config.getString("socs.network.router.ip");
+    rd.processPortNumber = Short.parseShort(config.getString("socs.network.router.port"));
     lsd = new LinkStateDatabase(rd);
-    try {
-      serverSocket = new ServerThread(Integer.parseInt(config.getString("socs.network.router.port")));
-      serverSocket.start();
-    } catch (NumberFormatException e) {
-      e.printStackTrace();
-      System.exit(-1);
-    }
   }
 
   public void terminal() {
@@ -172,7 +250,14 @@ public class Router {
    */
   private void processStart() {
     // Create serverSocket
-    //
+    try {
+      serverSocket = new ServerThread(rd.processPortNumber);
+      serverSocket.start();
+    } catch (NumberFormatException e) {
+      e.printStackTrace();
+      System.exit(-1);
+    }
+
   }
 
   /**

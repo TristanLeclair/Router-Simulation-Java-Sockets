@@ -16,12 +16,22 @@ public class LinkDB {
     links = new Link[_maxSize];
   }
 
+  /**
+   * Try to add link to DB, sets status of link to INIT
+   *
+   * @param processIP     of new link
+   * @param processPort   of new link
+   * @param simulatedIP   of new link
+   * @param currentRouter description to add to link pair
+   * @return true if link was added to DB
+   */
   public boolean addLink(String processIP, short processPort, String simulatedIP, RouterDescription currentRouter) {
 
     RouterDescription newRouter = new RouterDescription();
     newRouter.processPortNumber = processPort;
     newRouter.processIPAddress = processIP;
     newRouter.simulatedIPAddress = simulatedIP;
+    newRouter.status = RouterStatus.INIT;
 
     Link newLink = new Link(currentRouter, newRouter);
 
@@ -72,6 +82,20 @@ public class LinkDB {
    */
   public Optional<Link> findLink(short portNumber) {
     return Arrays.stream(links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
+  }
+
+  /**
+   * @param portNumber of link to change
+   * @return true if link was in DB and successfully changed
+   */
+  public boolean setLinkToTwoWay(short portNumber) {
+    Optional<Link> first = Arrays.stream(links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
+    if (first.isEmpty()) {
+      return false;
+    }
+
+    first.get().router2.status = RouterStatus.TWO_WAY;
+    return true;
   }
 
   @Override
