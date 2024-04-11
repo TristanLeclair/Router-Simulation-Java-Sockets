@@ -11,7 +11,9 @@ import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Optional;
 import java.util.Vector;
+import java.util.concurrent.atomic.AtomicInteger;
 import socs.network.message.LSA;
+import socs.network.message.LinkDescription;
 import socs.network.message.SOSPFPacket;
 import socs.network.util.Configuration;
 
@@ -23,14 +25,16 @@ public class Router {
   // assuming that all routers are with 4 ports
   LinkDB ports = new LinkDB(4);
   private String _commands = null;
+  private boolean started;
 
   public Router(Configuration config) {
+    started = false;
     rd.simulatedIPAddress = config.getString("socs.network.router.ip");
     rd.processPortNumber = Short.parseShort(config.getString("socs.network.router.port"));
     lsd = new LinkStateDatabase(rd);
   }
 
-  private void sendLSAToNeighbor(Link link) {
+  private void sendLSAToNeighbor(Link link, LSA lsa) {
     SOSPFPacket lsaUpdate = new SOSPFPacket();
     lsaUpdate.srcProcessIP = rd.simulatedIPAddress;
     lsaUpdate.srcProcessPort = rd.processPortNumber;
@@ -40,8 +44,7 @@ public class Router {
     lsaUpdate.routerID = rd.simulatedIPAddress;
     lsaUpdate.neighborID = link.router2.simulatedIPAddress;
     // Add all LSAs from the DB to the packet Vector
-    lsaUpdate.lsaArray = new Vector<>();
-    lsaUpdate.lsaArray.addAll(lsd._store.values());
+    lsaUpdate.lsa = lsa;
 
     try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
          ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
@@ -128,6 +131,8 @@ public class Router {
    */
   private void processDisconnect(short portNumber) {
     if (!ports.removeLink(portNumber)) {
+      System.out.println("Error disconnecting from link");
+      return;
     }
     // TODO: resync lsd
     // also remove thread from pool (that will eventually exist)
@@ -149,12 +154,15 @@ public class Router {
       return;
     }
 
-    boolean successfullyAdded = ports.addLink(processIP, processPort, simulatedIP, rd);
-    if (!successfullyAdded) {
+    if (!attachToRouter(processIP, processPort, simulatedIP)) {
       System.out.println("Error adding link to router");
       // TODO: figure out if we need to do something if router is full (think we
       // print)
     }
+  }
+
+  private boolean attachToRouter(String processIP, short processPort, String simulatedIP) {
+    return ports.addLink(processIP, processPort, simulatedIP, rd);
   }
 
   /**
@@ -209,6 +217,32 @@ public class Router {
       System.exit(-1);
     }
 
+    sendHellosToNeighbors();
+
+    sendLSAToNeighbors();
+
+    started = true;
+  }
+
+  private void sendLSAToNeighbors() {
+    LSA lsa = new LSA();
+    lsa.lsaSeqNumber = ports.getLsaSeqNumber().get();
+    LinkedList<LinkDescription> list = new LinkedList<>();
+    for (Link link : ports) {
+      LinkDescription ld = new LinkDescription();
+      ld.portNum = link.router2.processPortNumber;
+      ld.linkID = link.router2.simulatedIPAddress;
+      list.add(ld);
+    }
+    lsa.links = list;
+    lsa.linkStateID = rd.simulatedIPAddress;
+
+    for (Link link : ports) {
+      sendLSAToNeighbor(link, lsa);
+    }
+  }
+
+  private void sendHellosToNeighbors() {
     LinkedList<Thread> threads = new LinkedList<>();
     for (Link link : ports) {
       InitHandler initHandler = new InitHandler(link);
@@ -223,10 +257,6 @@ public class Router {
         throw new RuntimeException(e);
       }
     }
-
-    for (Link link: ports) {
-      sendLSAToNeighbor(link);
-    }
   }
 
   /**
@@ -239,7 +269,34 @@ public class Router {
    */
   private void processConnect(String processIP, short processPort,
                               String simulatedIP) {
+    if (!started) {
+      System.out.println("Need to start router first!");
+      return;
+    }
 
+    if (!requestHandler()) {
+      System.out.println("Router full");
+      return;
+    }
+
+    if (!attachToRouter(processIP, processPort, simulatedIP)) {
+      System.out.println("Error adding link to router");
+      return;
+    }
+    Optional<Link> link = ports.findLink(processPort);
+    if (link.isEmpty()) {
+      System.out.println("Error adding link to router");
+      return;
+    }
+    InitHandler initHandler = new InitHandler(link.get());
+    initHandler.start();
+    try {
+      initHandler.join();
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
+    }
+
+    sendLSAToNeighbors();
   }
 
   /**
@@ -368,14 +425,10 @@ public class Router {
 
     private void processLSAUpdate(SOSPFPacket packet) throws IOException {
       System.out.println("Received LSA update");
-      for (LSA lsa : packet.lsaArray) {
-        // Check if the LSA is from rd
-        if (lsa.linkStateID.equals(rd.simulatedIPAddress)) {
-          lsa.lsaSeqNumber++;
-        }
-        // Update the link state database
-        lsd.syncLinkStateDatabase(lsa);
+      if (rd.simulatedIPAddress.equals(packet.srcIP)) {
+        return;
       }
+      lsd.syncLinkStateDatabase(packet.lsa);
 
       // Synchronize on links from LinkDB?????
 
