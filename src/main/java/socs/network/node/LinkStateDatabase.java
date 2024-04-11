@@ -22,7 +22,8 @@ public class LinkStateDatabase {
   }
 
   /**
-   * output the shortest path from this router to the destination with the given IP address
+   * Output the shortest path from this router to the destination with the given IP address
+   * @param destinationIP The IP address of the destination router
    */
   public String getShortestPath(String destinationIP) {
     // Check if router exists in network
@@ -71,7 +72,12 @@ public class LinkStateDatabase {
     return shortestPath.toString();
   }
 
-  // Dijkstra's algorithm to find the shortest path
+  /**
+   * Dijkstra's algorithm to find the shortest path from source to destination
+   * @param source the source router
+   * @param destination the destination router
+   * @return a map of router IP addresses to the distance from the source router
+   */
   private synchronized Map<String, Integer> dijkstra(RouterDescription source, RouterDescription destination) {
       Map<String, Integer> distances = new HashMap<>();
       Map<String, String> previous = new HashMap<>();
@@ -127,6 +133,11 @@ public class LinkStateDatabase {
       return distances;
   }
 
+  /**
+   * Get the router with the minimum distance that has not been visited
+   * @param distances The map of router IP addresses to distances
+   * @param visited The set of visited routers
+   */
   private String getMinimumDistanceRouter(Map<String, Integer> distances, Set<String> visited) {
       String minRouter = null;
       int minDistance = Integer.MAX_VALUE;
@@ -140,7 +151,10 @@ public class LinkStateDatabase {
   }
 
 
-  //initialize the linkstate database by adding an entry about the router itself
+  /**
+   * initialize the linkstate database by adding an entry about the router itself
+   * @return the LSA instance containing the information about the router
+   */
   private LSA initLinkStateDatabase() {
     LSA lsa = new LSA();
     lsa.linkStateID = rd.simulatedIPAddress;
@@ -152,7 +166,29 @@ public class LinkStateDatabase {
     return lsa;
   }
 
-
+  /**
+   * Sync the link state database with the given LSA
+   * If the LSA already exists, update it if the sequence number is larger
+   * If the LSA does not exist, add it to the database
+   * 
+   * @param lsa The LSA to update the database with
+   */
+  public void syncLinkStateDatabase(LSA lsa) {
+    // Potentially lock on the lsa object instead of the whole store
+    synchronized (_store) {
+        if (_store.containsKey(lsa.linkStateID)) {
+            // Update the LSA if the sequence number is larger
+            LSA existingLsa = _store.get(lsa.linkStateID);
+            if (lsa.lsaSeqNumber > existingLsa.lsaSeqNumber) {
+                _store.put(lsa.linkStateID, lsa);
+            }
+        } else {
+            // Add the LSA if it does not exist
+            _store.put(lsa.linkStateID, lsa);
+        }
+    }
+  }
+   
   public String toString() {
     StringBuilder sb = new StringBuilder();
     for (LSA lsa: _store.values()) {
