@@ -8,9 +8,9 @@ import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.Optional;
 import java.util.Vector;
-
 import socs.network.message.LSA;
 import socs.network.message.SOSPFPacket;
 import socs.network.util.Configuration;
@@ -18,7 +18,7 @@ import socs.network.util.Configuration;
 public class Router {
 
   private class ServerThread extends Thread {
-    private short port;
+    private final short port;
 
     public ServerThread(short port) {
       this.port = port;
@@ -79,7 +79,7 @@ public class Router {
 
     private void processHello(SOSPFPacket packet, ObjectInputStream in, ObjectOutputStream out)
         throws IOException, ClassNotFoundException {
-      printRecHello(packet);
+      printRecHello(packet.neighborID);
 
       Optional<Link> link = ports.findLink(packet.srcProcessPort);
       if (link.isPresent()) {
@@ -89,7 +89,7 @@ public class Router {
       if (!ports.addLink(packet.srcIP, packet.srcProcessPort, packet.neighborID, rd)) {
         return;
       }
-      printSetState(packet, RouterStatus.INIT);
+      printSetState(packet.neighborID, RouterStatus.INIT);
 
       SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
           packet.neighborID, rd.simulatedIPAddress);
@@ -97,21 +97,13 @@ public class Router {
       out.flush();
 
       SOSPFPacket handshake = (SOSPFPacket) in.readObject();
-      printRecHello(handshake);
+      printRecHello(handshake.neighborID);
 
       if (!ports.setLinkToTwoWay(packet.srcProcessPort)) {
         System.out.println("Error");
         System.exit(1);
       }
-      printSetState(packet, RouterStatus.TWO_WAY);
-    }
-
-    private void printSetState(SOSPFPacket packet, RouterStatus status) {
-      System.out.printf("set %s STATE to %s%n", packet.neighborID, status.toString());
-    }
-
-    private void printRecHello(SOSPFPacket packet) {
-      System.out.printf("received HELLO from %s;%n", packet.neighborID);
+      printSetState(packet.neighborID, RouterStatus.TWO_WAY);
     }
 
     private void processLSAUpdate(SOSPFPacket packet) throws IOException {
@@ -128,35 +120,45 @@ public class Router {
       // Synchronize on links from LinkDB?????
 
       // Send LSA update to neighbors
-      for (Link link : ports.getLinks()) {
+      for (Link link : ports) {
         // Don't send to the neighbor that sent the LSA
         if (link.router2.simulatedIPAddress.equals(packet.srcIP)) {
           continue;
         }
-        SOSPFPacket lsaUpdate = new SOSPFPacket();
-        lsaUpdate.srcProcessIP = rd.simulatedIPAddress;
-        lsaUpdate.srcProcessPort = rd.processPortNumber;
-        lsaUpdate.srcIP = rd.simulatedIPAddress;
-        lsaUpdate.dstIP = link.router2.simulatedIPAddress;
-        lsaUpdate.sospfType = 1;
-        lsaUpdate.routerID = rd.simulatedIPAddress;
-        lsaUpdate.neighborID = link.router2.simulatedIPAddress;
-        // Add all LSAs from the DB to the packet Vector
-        lsaUpdate.lsaArray = new Vector<>();
-        for (LSA lsa : lsd._store.values()) {
-          lsaUpdate.lsaArray.add(lsa);
-        }
-
-        try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
-            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
-          out.writeObject(lsaUpdate);
-          out.flush();
-        } catch (IOException e) {
-          System.err.println("Failed to send LSA update to " + link.router2.simulatedIPAddress);
-          e.printStackTrace();
-        }
+        sendLSAToNeighbor(link);
       }
     }
+  }
+
+  private void sendLSAToNeighbor(Link link) {
+    SOSPFPacket lsaUpdate = new SOSPFPacket();
+    lsaUpdate.srcProcessIP = rd.simulatedIPAddress;
+    lsaUpdate.srcProcessPort = rd.processPortNumber;
+    lsaUpdate.srcIP = rd.simulatedIPAddress;
+    lsaUpdate.dstIP = link.router2.simulatedIPAddress;
+    lsaUpdate.sospfType = 1;
+    lsaUpdate.routerID = rd.simulatedIPAddress;
+    lsaUpdate.neighborID = link.router2.simulatedIPAddress;
+    // Add all LSAs from the DB to the packet Vector
+    lsaUpdate.lsaArray = new Vector<>();
+    lsaUpdate.lsaArray.addAll(lsd._store.values());
+
+    try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
+         ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
+      out.writeObject(lsaUpdate);
+      out.flush();
+    } catch (IOException e) {
+      System.err.println("Failed to send LSA update to " + link.router2.simulatedIPAddress);
+      e.printStackTrace();
+    }
+  }
+
+  private void printSetState(String id, RouterStatus status) {
+    System.out.printf("set %s STATE to %s%n", id, status.toString());
+  }
+
+  private void printRecHello(String id) {
+    System.out.printf("received HELLO from %s;%n", id);
   }
 
   protected LinkStateDatabase lsd;
@@ -325,7 +327,67 @@ public class Router {
       System.exit(-1);
     }
 
+    LinkedList<Thread> threads = new LinkedList<>();
+    for (Link link : ports) {
+      InitHandler initHandler = new InitHandler(link);
+      initHandler.start();
+      threads.add(initHandler);
+    }
+
+    for (Thread thread : threads) {
+      try {
+        thread.join();
+      } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+      }
+    }
+
+    for (Link link: ports) {
+      sendLSAToNeighbor(link);
+    }
   }
+
+  private class InitHandler extends Thread {
+    private final Link link;
+
+    private InitHandler(Link link) {
+      this.link = link;
+    }
+
+    @Override
+    public void run() {
+      try (Socket socket = new Socket("localhost", link.router2.processPortNumber)) {
+
+        SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
+            link.router2.simulatedIPAddress, rd.simulatedIPAddress);
+        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+        ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+
+        out.writeObject(hello);
+        out.flush();
+
+        SOSPFPacket response = (SOSPFPacket) in.readObject();
+        printRecHello(response.neighborID);
+
+        if (!ports.setLinkToTwoWay(response.srcProcessPort)) {
+          return;
+        }
+        printSetState(response.neighborID, RouterStatus.TWO_WAY);
+
+        out.writeObject(hello);
+        out.flush();
+
+        out.close();
+        in.close();
+
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      } catch (ClassNotFoundException e) {
+        System.err.println("Wrong response from server");
+      }
+    }
+  }
+
 
   /**
    * attach the link to the remote router, which is identified by the given
