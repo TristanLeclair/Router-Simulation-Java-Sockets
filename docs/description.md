@@ -98,8 +98,11 @@ After you run `START` message, the router where this command is triggered should
 The process of handling `HELLO` is as following:
 
 a. Router 1 (R1) broadcasts `HELLO` messages through all ports.
+
 b. The remote end (R2) receives a `HELLO` message, and sets the status in the RouterDescription of R1 as `INIT`, then sends `HELLO` to R1.
+
 c. R1 receives `HELLO` from R2, sets the status of R2 as `TWO_WAY`, and sends `HELLO` to R2.
+
 d. R2 receives `HELLO` from R1, and set the status of R1 as `TWO_WAY`
 
 ## Synchronize Link State Database
