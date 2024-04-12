@@ -10,6 +10,9 @@ import java.net.Socket;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Optional;
+
+import javax.sound.midi.Soundbank;
+
 import socs.network.message.LSA;
 import socs.network.message.LinkDescription;
 import socs.network.message.SOSPFPacket;
@@ -51,8 +54,11 @@ public class Router {
     // Add all LSAs from the DB to the packet Vector
     lsaUpdate.lsa = lsa;
 
-    try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
-        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
+    // System.out.println("Sending LSA update to " + link.router2.processIPAddress + " on port "
+    //     + link.router2.processPortNumber);
+
+    try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber)){
+      ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
       out.writeObject(lsaUpdate);
       out.flush();
     } catch (IOException e) {
@@ -91,13 +97,15 @@ public class Router {
               cmdLine[3]);
         } else if (command.equals("start")) {
           processStart();
-        } else if (command.equals("connect ")) {
+        } else if (command.startsWith("connect ")) {
           String[] cmdLine = command.split(" ");
           processConnect(cmdLine[1], Short.parseShort(cmdLine[2]),
               cmdLine[3]);
         } else if (command.equals("neighbors")) {
           // output neighbors
           processNeighbors();
+        } else if (command.equals("dd")) {
+          System.out.println(lsd.toString());
         } else {
           // invalid command
           System.out.println("Invalid command, please select one of: ");
@@ -136,14 +144,30 @@ public class Router {
    *                   port in Array)
    */
   private void processDisconnect(short portNumber) {
-    Link removedLink = ports.removeLinkByIndex(portNumber);
-    if (removedLink == null) {
+    Link linkToRemove = ports.getLinkByIndex(portNumber);
+
+    if (linkToRemove == null) {
       System.out.println("Port not currently populated");
       return;
     }
-    // TODO: resync lsd
+    // Update new LSA with updated links
+    LinkedList<LinkDescription> links = new LinkedList<>();
+    for (Link link : ports) {
+      if (link.router2.simulatedIPAddress.equals(linkToRemove.router2.simulatedIPAddress)) {
+        continue;
+      }
+      LinkDescription linkDescription = new LinkDescription();
+      linkDescription.linkID = link.router2.simulatedIPAddress;
+      linkDescription.portNum = link.router2.processPortNumber;
+      links.add(linkDescription);
+    }
 
-    sendLSAToNeighbors(removedLink);
+    LSA lsa = updateLSA(links);
+    lsd.syncLinkStateDatabase(lsa);
+
+    sendLSAToNeighbors();
+    
+    ports.removeLinkByIndex(portNumber);
   }
 
   /**
@@ -167,6 +191,10 @@ public class Router {
       // TODO: figure out if we need to do something if router is full (think we
       // print)
     }
+
+    // Add link to LSA
+    lsd._store.get(rd.simulatedIPAddress).links.add(new LinkDescription(simulatedIP, processPort));
+
   }
 
   private boolean attachToRouter(String processIP, short processPort, String simulatedIP) {
@@ -236,35 +264,17 @@ public class Router {
    * Send newly generated LSA to all current neighbors
    */
   private void sendLSAToNeighbors() {
-    LSA lsa = createUpdatedLSA();
+    LSA lsa = lsd._store.get(rd.simulatedIPAddress);
     for (Link link : ports) {
       sendLSAToNeighbor(link, lsa);
     }
   }
 
-  /**
-   * Send newly generated LSA to all current neighbors and disconnected link
-   */
-  private void sendLSAToNeighbors(Link disconnectedLink) {
-    LSA lsa = createUpdatedLSA();
-    for (Link link : ports) {
-      sendLSAToNeighbor(link, lsa);
-    }
-    sendLSAToNeighbor(disconnectedLink, lsa);
-  }
+  private LSA updateLSA(LinkedList<LinkDescription> links) {
+    LSA lsa = lsd._store.get(rd.simulatedIPAddress);
+    lsa.lsaSeqNumber++;
 
-  private LSA createUpdatedLSA() {
-    LSA lsa = new LSA();
-    lsa.lsaSeqNumber = ports.getLsaSeqNumber().get();
-    LinkedList<LinkDescription> list = new LinkedList<>();
-    for (Link link : ports) {
-      LinkDescription ld = new LinkDescription();
-      ld.portNum = link.router2.processPortNumber;
-      ld.linkID = link.router2.simulatedIPAddress;
-      list.add(ld);
-    }
-    lsa.links = list;
-    lsa.linkStateID = rd.simulatedIPAddress;
+    lsa.links.addAll(links);
     return lsa;
   }
 
@@ -275,7 +285,6 @@ public class Router {
   private void sendHellosToNeighbors() {
     LinkedList<Thread> threads = new LinkedList<>();
     for (Link link : ports) {
-      System.out.println("Creating init handler");
       InitHandler initHandler = new InitHandler(link);
       initHandler.start();
       threads.add(initHandler);
@@ -315,7 +324,7 @@ public class Router {
       return;
     }
     Optional<Link> link = ports.findLink(processPort);
-    if (link.isEmpty()) {
+    if (!link.isPresent()) {
       System.out.println("Error adding link to router");
       return;
     }
@@ -376,11 +385,11 @@ public class Router {
     @Override
     public void run() {
       try (ServerSocket serverSocket = new ServerSocket(port)) {
-        System.out.println("Server listening on port " + port);
+        // System.out.println("Server listening on port " + port);
 
         while (!serverSocket.isClosed()) {
           Socket socket = serverSocket.accept();
-          System.out.println("Creating thread from socket :" + socket.getPort());
+          // System.out.println("Creating thread from socket :" + socket.getPort());
           new ClientHandler(socket).start();
         }
       } catch (IOException ex) {
@@ -406,16 +415,19 @@ public class Router {
         ObjectOutputStream outToClient = new ObjectOutputStream(socket.getOutputStream());
         SOSPFPacket packet = (SOSPFPacket) inFromClient.readObject();
 
+      
         if (packet.sospfType == 0) {
           processHello(packet, inFromClient, outToClient);
+          // Print out the prompt for the next command
+          System.out.println(">>");
         } else if (packet.sospfType == 1) {
+          System.out.println("Received LSA update");
           processLSAUpdate(packet);
         }
-
         socket.close();
 
       } catch (IOException | ClassNotFoundException ex) {
-        System.err.println("Server exception: " + ex.getMessage());
+        System.err.println("Client exception: " + ex.getMessage());
         ex.printStackTrace();
         System.exit(0);
       } finally {
@@ -444,11 +456,18 @@ public class Router {
 
       SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
           packet.neighborID, rd.simulatedIPAddress);
+
       out.writeObject(hello);
       out.flush();
 
-      SOSPFPacket handshake = (SOSPFPacket) in.readObject();
-      printRecHello(handshake.neighborID);
+      try {
+        SOSPFPacket handshake = (SOSPFPacket) in.readObject();
+        printRecHello(handshake.neighborID);    
+      } catch (IOException e) {
+        System.err.println("Failed to receive handshake");
+        e.printStackTrace();
+      }
+    
 
       if (!ports.setLinkToTwoWay(packet.srcProcessPort)) {
         System.out.println("Error");
@@ -466,14 +485,21 @@ public class Router {
 
       // Check that node doesn't remove us from its neighbors
       boolean updatedLocalTopology = false;
-      Link removedLink = null;
       for (Link link : ports) {
         if (packet.lsa.linkStateID == link.router2.simulatedIPAddress) {
           Optional<LinkDescription> first = packet.lsa.links.stream().filter(x -> x.linkID == rd.simulatedIPAddress)
               .findFirst();
-          if (first.isEmpty()) {
+          if (!first.isPresent()) {
             updatedLocalTopology = ports.removeLink(link.router2.processPortNumber);
-            removedLink = link;
+
+            // Update LSA with updated links
+            LinkedList<LinkDescription> links = new LinkedList<>();
+            for (Link l : ports) {
+              LinkDescription linkDescription = new LinkDescription(l.router2.simulatedIPAddress, l.router2.processPortNumber);
+              links.add(linkDescription);
+            }
+            LSA lsa = updateLSA(links);
+            lsd.syncLinkStateDatabase(lsa);
           }
         }
       }
@@ -488,7 +514,7 @@ public class Router {
       }
 
       if (updatedLocalTopology) {
-        sendLSAToNeighbors(removedLink);
+        sendLSAToNeighbors();
       }
     }
   }
