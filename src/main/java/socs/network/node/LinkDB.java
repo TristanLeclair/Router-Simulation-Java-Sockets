@@ -69,6 +69,7 @@ public class LinkDB implements Iterable<Link> {
     for (int i = 0; i < _maxSize; ++i) {
       if (_links[i] == null) {
         _links[i] = link;
+        break;
       }
     }
     currentSize++;
@@ -100,10 +101,19 @@ public class LinkDB implements Iterable<Link> {
    * @return Link
    */
   public Link removeLinkByIndex(int index) {
-    Link link = _links[index];
+    Link link = getLinkByIndex(index);
     _links[index] = null;
     lsaSeqNumber.addAndGet(1);
     return link;
+  }
+
+  /**
+   * Get link by index
+   * @param index of link (0-_maxSize)
+   * @return
+   */
+  public Link getLinkByIndex(int index) {
+    return _links[index];
   }
 
   /**
@@ -120,7 +130,7 @@ public class LinkDB implements Iterable<Link> {
    */
   public boolean setLinkToTwoWay(short portNumber) {
     Optional<Link> first = Arrays.stream(_links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
-    if (first.isEmpty()) {
+    if (!first.isPresent()) {
       return false;
     }
 
