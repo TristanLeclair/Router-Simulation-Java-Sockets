@@ -50,25 +50,13 @@ public class LinkDB implements Iterable<Link> {
 
     Link newLink = new Link(currentRouter, newRouter);
 
-    return addLink(newLink);
-  }
-
-  public boolean canAddLink() {
-    return currentSize < _maxSize;
-  }
-
-  /**
-   * @param link to add to list
-   * @return true if link added
-   */
-  private boolean addLink(Link link) {
-    if (!canAddLink()) {
+    if (!(currentSize < _maxSize)) {
       return false;
     }
 
     for (int i = 0; i < _maxSize; ++i) {
       if (_links[i] == null) {
-        _links[i] = link;
+        _links[i] = newLink;
         break;
       }
     }
@@ -76,6 +64,7 @@ public class LinkDB implements Iterable<Link> {
     lsaSeqNumber.addAndGet(1);
     return true;
   }
+
 
   /**
    * @param portNumber port of link to remove from list

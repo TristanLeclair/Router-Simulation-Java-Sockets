@@ -209,7 +209,8 @@ public class Router {
    * safe to reject the attached request from router2.
    */
   private boolean requestHandler() {
-    return ports.canAddLink();
+    return true;
+    // return ports.canAddLink();
     // if (!ports.canAddLink()) {
     // return false;
     // }
@@ -274,6 +275,7 @@ public class Router {
     LSA lsa = lsd._store.get(rd.simulatedIPAddress);
     lsa.lsaSeqNumber++;
 
+    lsa.links.clear();
     lsa.links.addAll(links);
     return lsa;
   }
@@ -451,8 +453,14 @@ public class Router {
       if (!ports.addLink(packet.srcIP, packet.srcProcessPort, packet.neighborID, rd)) {
         return;
       }
+
+      // Add link to LSA
+      lsd._store.get(rd.simulatedIPAddress).links.add(new LinkDescription(packet.neighborID, packet.srcProcessPort));
+      // Update sequence number in lsd
+      lsd._store.get(rd.simulatedIPAddress).lsaSeqNumber++;
+
       printSetState(packet.neighborID, RouterStatus.INIT);
-      System.out.println(Thread.currentThread().getName());
+      // System.out.println(Thread.currentThread().getName());
 
       SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
           packet.neighborID, rd.simulatedIPAddress);
@@ -474,27 +482,37 @@ public class Router {
         System.exit(1);
       }
       printSetState(packet.neighborID, RouterStatus.TWO_WAY);
+
+      // Send LSA to neighbors
+      sendLSAToNeighbors();
+
     }
 
     private void processLSAUpdate(SOSPFPacket packet) throws IOException {
       System.out.println("Received LSA update");
+      // If the LSA is from the same router, ignore it
       if (rd.simulatedIPAddress.equals(packet.srcIP)) {
         return;
       }
+
       lsd.syncLinkStateDatabase(packet.lsa);
 
       // Check that node doesn't remove us from its neighbors
       boolean updatedLocalTopology = false;
       for (Link link : ports) {
-        if (packet.lsa.linkStateID == link.router2.simulatedIPAddress) {
-          Optional<LinkDescription> first = packet.lsa.links.stream().filter(x -> x.linkID == rd.simulatedIPAddress)
+        if (packet.lsa.linkStateID.equals(link.router2.simulatedIPAddress)) {
+          Optional<LinkDescription> first = packet.lsa.links.stream().filter(x -> x.linkID.equals(rd.simulatedIPAddress))
               .findFirst();
           if (!first.isPresent()) {
+            System.out.println("Removing link from " + packet.lsa.linkStateID);
             updatedLocalTopology = ports.removeLink(link.router2.processPortNumber);
 
             // Update LSA with updated links
             LinkedList<LinkDescription> links = new LinkedList<>();
             for (Link l : ports) {
+              if (l.router2.simulatedIPAddress.equals(packet.lsa.linkStateID)) {
+                continue;
+              }
               LinkDescription linkDescription = new LinkDescription(l.router2.simulatedIPAddress, l.router2.processPortNumber);
               links.add(linkDescription);
             }
