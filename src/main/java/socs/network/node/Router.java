@@ -8,172 +8,65 @@ import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.Optional;
-import java.util.Vector;
-
 import socs.network.message.LSA;
+import socs.network.message.LinkDescription;
 import socs.network.message.SOSPFPacket;
 import socs.network.util.Configuration;
 
 public class Router {
 
-  private class ServerThread extends Thread {
-    private short port;
-
-    public ServerThread(short port) {
-      this.port = port;
-    }
-
-    @Override
-    public void run() {
-      try (ServerSocket serverSocket = new ServerSocket(port)) {
-        System.out.println("Server listening on port " + port);
-
-        while (!serverSocket.isClosed()) {
-          Socket socket = serverSocket.accept();
-          new ClientHandler(socket).start();
-        }
-      } catch (IOException ex) {
-        System.err.println("Server exception: " + ex.getMessage());
-        ex.printStackTrace();
-        System.exit(0);
-      }
-    }
-
-  }
-
-  private class ClientHandler extends Thread {
-    private final Socket socket;
-
-    public ClientHandler(Socket socket) {
-      this.socket = socket;
-    }
-
-    @Override
-    public void run() {
-      try {
-        ObjectInputStream inFromClient = new ObjectInputStream(socket.getInputStream());
-        ObjectOutputStream outToClient = new ObjectOutputStream(socket.getOutputStream());
-        SOSPFPacket packet = (SOSPFPacket) inFromClient.readObject();
-
-        if (packet.sospfType == 0) {
-          processHello(packet, inFromClient, outToClient);
-        } else if (packet.sospfType == 1) {
-          processLSAUpdate(packet);
-        }
-
-        socket.close();
-
-      } catch (IOException | ClassNotFoundException ex) {
-        System.err.println("Server exception: " + ex.getMessage());
-        ex.printStackTrace();
-        System.exit(0);
-      } finally {
-        try {
-          socket.close();
-        } catch (IOException e) {
-          System.err.println("Failed to close socket: " + e.getMessage());
-        }
-      }
-    }
-
-    private void processHello(SOSPFPacket packet, ObjectInputStream in, ObjectOutputStream out)
-        throws IOException, ClassNotFoundException {
-      printRecHello(packet);
-
-      Optional<Link> link = ports.findLink(packet.srcProcessPort);
-      if (link.isPresent()) {
-        return;
-      }
-
-      if (!ports.addLink(packet.srcIP, packet.srcProcessPort, packet.neighborID, rd)) {
-        return;
-      }
-      printSetState(packet, RouterStatus.INIT);
-
-      SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
-          packet.neighborID, rd.simulatedIPAddress);
-      out.writeObject(hello);
-      out.flush();
-
-      SOSPFPacket handshake = (SOSPFPacket) in.readObject();
-      printRecHello(handshake);
-
-      if (!ports.setLinkToTwoWay(packet.srcProcessPort)) {
-        System.out.println("Error");
-        System.exit(1);
-      }
-      printSetState(packet, RouterStatus.TWO_WAY);
-    }
-
-    private void printSetState(SOSPFPacket packet, RouterStatus status) {
-      System.out.printf("set %s STATE to %s%n", packet.neighborID, status.toString());
-    }
-
-    private void printRecHello(SOSPFPacket packet) {
-      System.out.printf("received HELLO from %s;%n", packet.neighborID);
-    }
-
-    private void processLSAUpdate(SOSPFPacket packet) throws IOException {
-      System.out.println("Received LSA update");
-      for (LSA lsa : packet.lsaArray) {
-        // Check if the LSA is from rd
-        if (lsa.linkStateID.equals(rd.simulatedIPAddress)) {
-          lsa.lsaSeqNumber++;
-        }
-        // Update the link state database
-        lsd.syncLinkStateDatabase(lsa);
-      }
-
-      // Synchronize on links from LinkDB?????
-
-      // Send LSA update to neighbors
-      for (Link link : ports.getLinks()) {
-        // Don't send to the neighbor that sent the LSA
-        if (link.router2.simulatedIPAddress.equals(packet.srcIP)) {
-          continue;
-        }
-        SOSPFPacket lsaUpdate = new SOSPFPacket();
-        lsaUpdate.srcProcessIP = rd.simulatedIPAddress;
-        lsaUpdate.srcProcessPort = rd.processPortNumber;
-        lsaUpdate.srcIP = rd.simulatedIPAddress;
-        lsaUpdate.dstIP = link.router2.simulatedIPAddress;
-        lsaUpdate.sospfType = 1;
-        lsaUpdate.routerID = rd.simulatedIPAddress;
-        lsaUpdate.neighborID = link.router2.simulatedIPAddress;
-        // Add all LSAs from the DB to the packet Vector
-        lsaUpdate.lsaArray = new Vector<>();
-        for (LSA lsa : lsd._store.values()) {
-          lsaUpdate.lsaArray.add(lsa);
-        }
-
-        try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
-            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
-          out.writeObject(lsaUpdate);
-          out.flush();
-        } catch (IOException e) {
-          System.err.println("Failed to send LSA update to " + link.router2.simulatedIPAddress);
-          e.printStackTrace();
-        }
-      }
-    }
-  }
-
   protected LinkStateDatabase lsd;
-
   RouterDescription rd = new RouterDescription();
-
   ServerThread serverSocket;
-
   // assuming that all routers are with 4 ports
   LinkDB ports = new LinkDB(4);
-
   private String _commands = null;
+  private boolean started;
 
   public Router(Configuration config) {
+    started = false;
     rd.simulatedIPAddress = config.getString("socs.network.router.ip");
     rd.processPortNumber = Short.parseShort(config.getString("socs.network.router.port"));
     lsd = new LinkStateDatabase(rd);
+  }
+
+  /**
+   * Send LSA to neighbor represented in link, LSA is pregenerated as to avoid
+   * race conditions
+   *
+   * @param link representing neighbor to send to
+   * @param lsa  current state of Router's connections
+   */
+  private void sendLSAToNeighbor(Link link, LSA lsa) {
+    SOSPFPacket lsaUpdate = new SOSPFPacket();
+    lsaUpdate.srcProcessIP = rd.simulatedIPAddress;
+    lsaUpdate.srcProcessPort = rd.processPortNumber;
+    lsaUpdate.srcIP = rd.simulatedIPAddress;
+    lsaUpdate.dstIP = link.router2.simulatedIPAddress;
+    lsaUpdate.sospfType = 1;
+    lsaUpdate.routerID = rd.simulatedIPAddress;
+    lsaUpdate.neighborID = link.router2.simulatedIPAddress;
+    // Add all LSAs from the DB to the packet Vector
+    lsaUpdate.lsa = lsa;
+
+    try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
+        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
+      out.writeObject(lsaUpdate);
+      out.flush();
+    } catch (IOException e) {
+      System.err.println("Failed to send LSA update to " + link.router2.simulatedIPAddress);
+      e.printStackTrace();
+    }
+  }
+
+  private void printSetState(String id, RouterStatus status) {
+    System.out.printf("set %s STATE to %s%n", id, status.toString());
+  }
+
+  private void printRecHello(String id) {
+    System.out.printf("received HELLO from %s;%n", id);
   }
 
   public void terminal() {
@@ -239,14 +132,18 @@ public class Router {
    * disconnect with the router identified by the given destination ip address
    * Notice: this command should trigger the synchronization of database
    *
-   * @param portNumber the port number which the link attaches at
+   * @param portNumber the port number which the link attaches at (0-3, index of
+   *                   port in Array)
    */
   private void processDisconnect(short portNumber) {
-    if (!ports.removeLink(portNumber)) {
+    Link removedLink = ports.removeLinkByIndex(portNumber);
+    if (removedLink == null) {
+      System.out.println("Port not currently populated");
       return;
     }
     // TODO: resync lsd
-    // also remove thread from pool (that will eventually exist)
+
+    sendLSAToNeighbors(removedLink);
   }
 
   /**
@@ -258,19 +155,22 @@ public class Router {
    * NOTE: this command should not trigger link database synchronization
    */
   private void processAttach(String processIP, short processPort,
-                             String simulatedIP) {
+      String simulatedIP) {
     // TODO: establish link without sync
     if (!requestHandler()) {
       System.out.println("Router full");
       return;
     }
 
-    boolean successfullyAdded = ports.addLink(processIP, processPort, simulatedIP, rd);
-    if (!successfullyAdded) {
+    if (!attachToRouter(processIP, processPort, simulatedIP)) {
       System.out.println("Error adding link to router");
       // TODO: figure out if we need to do something if router is full (think we
       // print)
     }
+  }
+
+  private boolean attachToRouter(String processIP, short processPort, String simulatedIP) {
+    return ports.addLink(processIP, processPort, simulatedIP, rd);
   }
 
   /**
@@ -325,6 +225,69 @@ public class Router {
       System.exit(-1);
     }
 
+    sendHellosToNeighbors();
+
+    sendLSAToNeighbors();
+
+    started = true;
+  }
+
+  /**
+   * Send newly generated LSA to all current neighbors
+   */
+  private void sendLSAToNeighbors() {
+    LSA lsa = createUpdatedLSA();
+    for (Link link : ports) {
+      sendLSAToNeighbor(link, lsa);
+    }
+  }
+
+  /**
+   * Send newly generated LSA to all current neighbors and disconnected link
+   */
+  private void sendLSAToNeighbors(Link disconnectedLink) {
+    LSA lsa = createUpdatedLSA();
+    for (Link link : ports) {
+      sendLSAToNeighbor(link, lsa);
+    }
+    sendLSAToNeighbor(disconnectedLink, lsa);
+  }
+
+  private LSA createUpdatedLSA() {
+    LSA lsa = new LSA();
+    lsa.lsaSeqNumber = ports.getLsaSeqNumber().get();
+    LinkedList<LinkDescription> list = new LinkedList<>();
+    for (Link link : ports) {
+      LinkDescription ld = new LinkDescription();
+      ld.portNum = link.router2.processPortNumber;
+      ld.linkID = link.router2.simulatedIPAddress;
+      list.add(ld);
+    }
+    lsa.links = list;
+    lsa.linkStateID = rd.simulatedIPAddress;
+    return lsa;
+  }
+
+  /**
+   * Sends HELLOs to all current neighbors and joins threads to ensure completion
+   * of handshakes
+   */
+  private void sendHellosToNeighbors() {
+    LinkedList<Thread> threads = new LinkedList<>();
+    for (Link link : ports) {
+      System.out.println("Creating init handler");
+      InitHandler initHandler = new InitHandler(link);
+      initHandler.start();
+      threads.add(initHandler);
+    }
+
+    for (Thread thread : threads) {
+      try {
+        thread.join();
+      } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+      }
+    }
   }
 
   /**
@@ -336,8 +299,35 @@ public class Router {
    * This command does trigger the link database synchronization
    */
   private void processConnect(String processIP, short processPort,
-                              String simulatedIP) {
+      String simulatedIP) {
+    if (!started) {
+      System.out.println("Need to start router first!");
+      return;
+    }
 
+    if (!requestHandler()) {
+      System.out.println("Router full");
+      return;
+    }
+
+    if (!attachToRouter(processIP, processPort, simulatedIP)) {
+      System.out.println("Error adding link to router");
+      return;
+    }
+    Optional<Link> link = ports.findLink(processPort);
+    if (link.isEmpty()) {
+      System.out.println("Error adding link to router");
+      return;
+    }
+    InitHandler initHandler = new InitHandler(link.get());
+    initHandler.start();
+    try {
+      initHandler.join();
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
+    }
+
+    sendLSAToNeighbors();
   }
 
   /**
@@ -351,7 +341,8 @@ public class Router {
    * disconnect with all neighbors and quit the program
    */
   private void processQuit() {
-
+    // Shouldn't send anything to anybody as it doesn't have any more neighbors.
+    System.exit(0);
   }
 
   private String getCommands() {
@@ -373,6 +364,174 @@ public class Router {
     _commands = sb.toString();
 
     return _commands;
+  }
+
+  private class ServerThread extends Thread {
+    private final short port;
+
+    public ServerThread(short port) {
+      this.port = port;
+    }
+
+    @Override
+    public void run() {
+      try (ServerSocket serverSocket = new ServerSocket(port)) {
+        System.out.println("Server listening on port " + port);
+
+        while (!serverSocket.isClosed()) {
+          Socket socket = serverSocket.accept();
+          System.out.println("Creating thread from socket :" + socket.getPort());
+          new ClientHandler(socket).start();
+        }
+      } catch (IOException ex) {
+        System.err.println("Server exception: " + ex.getMessage());
+        ex.printStackTrace();
+        System.exit(0);
+      }
+    }
+
+  }
+
+  private class ClientHandler extends Thread {
+    private final Socket socket;
+
+    public ClientHandler(Socket socket) {
+      this.socket = socket;
+    }
+
+    @Override
+    public void run() {
+      try {
+        ObjectInputStream inFromClient = new ObjectInputStream(socket.getInputStream());
+        ObjectOutputStream outToClient = new ObjectOutputStream(socket.getOutputStream());
+        SOSPFPacket packet = (SOSPFPacket) inFromClient.readObject();
+
+        if (packet.sospfType == 0) {
+          processHello(packet, inFromClient, outToClient);
+        } else if (packet.sospfType == 1) {
+          processLSAUpdate(packet);
+        }
+
+        socket.close();
+
+      } catch (IOException | ClassNotFoundException ex) {
+        System.err.println("Server exception: " + ex.getMessage());
+        ex.printStackTrace();
+        System.exit(0);
+      } finally {
+        try {
+          socket.close();
+        } catch (IOException e) {
+          System.err.println("Failed to close socket: " + e.getMessage());
+        }
+      }
+    }
+
+    private void processHello(SOSPFPacket packet, ObjectInputStream in, ObjectOutputStream out)
+        throws IOException, ClassNotFoundException {
+      printRecHello(packet.neighborID);
+
+      Optional<Link> link = ports.findLink(packet.srcProcessPort);
+      if (link.isPresent()) {
+        return;
+      }
+
+      if (!ports.addLink(packet.srcIP, packet.srcProcessPort, packet.neighborID, rd)) {
+        return;
+      }
+      printSetState(packet.neighborID, RouterStatus.INIT);
+      System.out.println(Thread.currentThread().getName());
+
+      SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
+          packet.neighborID, rd.simulatedIPAddress);
+      out.writeObject(hello);
+      out.flush();
+
+      SOSPFPacket handshake = (SOSPFPacket) in.readObject();
+      printRecHello(handshake.neighborID);
+
+      if (!ports.setLinkToTwoWay(packet.srcProcessPort)) {
+        System.out.println("Error");
+        System.exit(1);
+      }
+      printSetState(packet.neighborID, RouterStatus.TWO_WAY);
+    }
+
+    private void processLSAUpdate(SOSPFPacket packet) throws IOException {
+      System.out.println("Received LSA update");
+      if (rd.simulatedIPAddress.equals(packet.srcIP)) {
+        return;
+      }
+      lsd.syncLinkStateDatabase(packet.lsa);
+
+      // Check that node doesn't remove us from its neighbors
+      boolean updatedLocalTopology = false;
+      Link removedLink = null;
+      for (Link link : ports) {
+        if (packet.lsa.linkStateID == link.router2.simulatedIPAddress) {
+          Optional<LinkDescription> first = packet.lsa.links.stream().filter(x -> x.linkID == rd.simulatedIPAddress)
+              .findFirst();
+          if (first.isEmpty()) {
+            updatedLocalTopology = ports.removeLink(link.router2.processPortNumber);
+            removedLink = link;
+          }
+        }
+      }
+
+      // Forward to neighbors
+      for (Link link : ports) {
+        // Don't send to the neighbor that sent the LSA
+        if (link.router2.simulatedIPAddress.equals(packet.srcIP)) {
+          continue;
+        }
+        sendLSAToNeighbor(link, packet.lsa);
+      }
+
+      if (updatedLocalTopology) {
+        sendLSAToNeighbors(removedLink);
+      }
+    }
+  }
+
+  private class InitHandler extends Thread {
+    private final Link link;
+
+    private InitHandler(Link link) {
+      this.link = link;
+    }
+
+    @Override
+    public void run() {
+      try (Socket socket = new Socket("localhost", link.router2.processPortNumber)) {
+
+        SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
+            link.router2.simulatedIPAddress, rd.simulatedIPAddress);
+        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+        ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+
+        out.writeObject(hello);
+        out.flush();
+
+        SOSPFPacket response = (SOSPFPacket) in.readObject();
+        printRecHello(response.neighborID);
+
+        if (!ports.setLinkToTwoWay(response.srcProcessPort)) {
+          return;
+        }
+        printSetState(response.neighborID, RouterStatus.TWO_WAY);
+
+        out.writeObject(hello);
+        out.flush();
+
+        out.close();
+        in.close();
+
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      } catch (ClassNotFoundException e) {
+        System.err.println("Wrong response from server");
+      }
+    }
   }
 
 }

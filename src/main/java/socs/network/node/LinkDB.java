@@ -1,19 +1,33 @@
 package socs.network.node;
 
 import java.util.Arrays;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public class LinkDB {
-  private Link[] links;
-  private int _maxSize;
+public class LinkDB implements Iterable<Link> {
+  private final Link[] _links;
+  private final int _maxSize;
+
+  public int getCurrentSize() {
+    return currentSize;
+  }
+
   private int currentSize;
+
+  public AtomicInteger getLsaSeqNumber() {
+    return lsaSeqNumber;
+  }
+
+  private AtomicInteger lsaSeqNumber = new AtomicInteger(Integer.MIN_VALUE);
 
   /**
    * @param size max size of DB
    */
   public LinkDB(int size) {
     _maxSize = size;
-    links = new Link[_maxSize];
+    _links = new Link[_maxSize];
   }
 
   /**
@@ -25,7 +39,8 @@ public class LinkDB {
    * @param currentRouter description to add to link pair
    * @return true if link was added to DB
    */
-  public boolean addLink(String processIP, short processPort, String simulatedIP, RouterDescription currentRouter) {
+  public boolean addLink(String processIP, short processPort, String simulatedIP,
+      RouterDescription currentRouter) {
 
     RouterDescription newRouter = new RouterDescription();
     newRouter.processPortNumber = processPort;
@@ -46,17 +61,18 @@ public class LinkDB {
    * @param link to add to list
    * @return true if link added
    */
-  public boolean addLink(Link link) {
-    if (currentSize >= 4) {
+  private boolean addLink(Link link) {
+    if (!canAddLink()) {
       return false;
     }
 
     for (int i = 0; i < _maxSize; ++i) {
-      if (links[i] == null) {
-        links[i] = link;
+      if (_links[i] == null) {
+        _links[i] = link;
       }
     }
     currentSize++;
+    lsaSeqNumber.addAndGet(1);
     return true;
   }
 
@@ -66,14 +82,28 @@ public class LinkDB {
    */
   public boolean removeLink(short portNumber) {
     for (int i = 0; i < _maxSize; ++i) {
-      Link link = links[i];
+      Link link = _links[i];
       if (link.router2.processPortNumber == portNumber) {
-        links[i] = null;
+        _links[i] = null;
         return true;
       }
     }
+    lsaSeqNumber.addAndGet(1);
 
     return false;
+  }
+
+  /**
+   * Remove link by index
+   *
+   * @param index of link (0-_maxSize)
+   * @return Link
+   */
+  public Link removeLinkByIndex(int index) {
+    Link link = _links[index];
+    _links[index] = null;
+    lsaSeqNumber.addAndGet(1);
+    return link;
   }
 
   /**
@@ -81,7 +111,7 @@ public class LinkDB {
    * @return first link to have port number in list
    */
   public Optional<Link> findLink(short portNumber) {
-    return Arrays.stream(links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
+    return Arrays.stream(_links).filter(x -> x != null && x.router2.processPortNumber == portNumber).findFirst();
   }
 
   /**
@@ -89,7 +119,7 @@ public class LinkDB {
    * @return true if link was in DB and successfully changed
    */
   public boolean setLinkToTwoWay(short portNumber) {
-    Optional<Link> first = Arrays.stream(links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
+    Optional<Link> first = Arrays.stream(_links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
     if (first.isEmpty()) {
       return false;
     }
@@ -105,7 +135,7 @@ public class LinkDB {
     }
 
     StringBuilder sb = new StringBuilder();
-    for (Link link : links) {
+    for (Link link : _links) {
       if (link == null) {
         continue;
       }
@@ -114,8 +144,27 @@ public class LinkDB {
     return sb.toString();
   }
 
-  public Link[] getLinks() {
-    return links;
-  }
+  @Override
+  public Iterator<Link> iterator() {
+    return new Iterator<Link>() {
+      private int currentIndex = 0;
 
+      @Override
+      public boolean hasNext() {
+        // Skips over null elements as the array can have holes in it
+        while (currentIndex < _maxSize && _links[currentIndex] == null) {
+          currentIndex++;
+        }
+        return currentIndex < _maxSize;
+      }
+
+      @Override
+      public Link next() {
+        if (!hasNext()) {
+          throw new NoSuchElementException();
+        }
+        return _links[currentIndex++];
+      }
+    };
+  }
 }
