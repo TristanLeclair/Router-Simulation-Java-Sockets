@@ -312,34 +312,10 @@ public class Router {
    */
   private void processConnect(String processIP, short processPort,
       String simulatedIP) {
-    if (!started) {
-      System.out.println("Need to start router first!");
-      return;
-    }
+    
+    processAttach(processIP, processPort, simulatedIP);    
 
-    if (!requestHandler()) {
-      System.out.println("Router full");
-      return;
-    }
-
-    if (!attachToRouter(processIP, processPort, simulatedIP)) {
-      System.out.println("Error adding link to router");
-      return;
-    }
-    Optional<Link> link = ports.findLink(processPort);
-    if (!link.isPresent()) {
-      System.out.println("Error adding link to router");
-      return;
-    }
-    InitHandler initHandler = new InitHandler(link.get());
-    initHandler.start();
-    try {
-      initHandler.join();
-    } catch (InterruptedException e) {
-      throw new RuntimeException(e);
-    }
-
-    sendLSAToNeighbors();
+    processStart();
   }
 
   /**
