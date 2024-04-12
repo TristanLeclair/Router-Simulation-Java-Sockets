@@ -10,8 +10,6 @@ import java.net.Socket;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Optional;
-import java.util.Vector;
-import java.util.concurrent.atomic.AtomicInteger;
 import socs.network.message.LSA;
 import socs.network.message.LinkDescription;
 import socs.network.message.SOSPFPacket;
@@ -34,6 +32,13 @@ public class Router {
     lsd = new LinkStateDatabase(rd);
   }
 
+  /**
+   * Send LSA to neighbor represented in link, LSA is pregenerated as to avoid
+   * race conditions
+   *
+   * @param link representing neighbor to send to
+   * @param lsa  current state of Router's connections
+   */
   private void sendLSAToNeighbor(Link link, LSA lsa) {
     SOSPFPacket lsaUpdate = new SOSPFPacket();
     lsaUpdate.srcProcessIP = rd.simulatedIPAddress;
@@ -47,7 +52,7 @@ public class Router {
     lsaUpdate.lsa = lsa;
 
     try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);
-         ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
+        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
       out.writeObject(lsaUpdate);
       out.flush();
     } catch (IOException e) {
@@ -127,15 +132,18 @@ public class Router {
    * disconnect with the router identified by the given destination ip address
    * Notice: this command should trigger the synchronization of database
    *
-   * @param portNumber the port number which the link attaches at
+   * @param portNumber the port number which the link attaches at (0-3, index of
+   *                   port in Array)
    */
   private void processDisconnect(short portNumber) {
-    if (!ports.removeLink(portNumber)) {
-      System.out.println("Error disconnecting from link");
+    Link removedLink = ports.removeLinkByIndex(portNumber);
+    if (removedLink == null) {
+      System.out.println("Port not currently populated");
       return;
     }
     // TODO: resync lsd
-    // also remove thread from pool (that will eventually exist)
+
+    sendLSAToNeighbors(removedLink);
   }
 
   /**
@@ -147,7 +155,7 @@ public class Router {
    * NOTE: this command should not trigger link database synchronization
    */
   private void processAttach(String processIP, short processPort,
-                             String simulatedIP) {
+      String simulatedIP) {
     // TODO: establish link without sync
     if (!requestHandler()) {
       System.out.println("Router full");
@@ -224,7 +232,28 @@ public class Router {
     started = true;
   }
 
+  /**
+   * Send newly generated LSA to all current neighbors
+   */
   private void sendLSAToNeighbors() {
+    LSA lsa = createUpdatedLSA();
+    for (Link link : ports) {
+      sendLSAToNeighbor(link, lsa);
+    }
+  }
+
+  /**
+   * Send newly generated LSA to all current neighbors and disconnected link
+   */
+  private void sendLSAToNeighbors(Link disconnectedLink) {
+    LSA lsa = createUpdatedLSA();
+    for (Link link : ports) {
+      sendLSAToNeighbor(link, lsa);
+    }
+    sendLSAToNeighbor(disconnectedLink, lsa);
+  }
+
+  private LSA createUpdatedLSA() {
     LSA lsa = new LSA();
     lsa.lsaSeqNumber = ports.getLsaSeqNumber().get();
     LinkedList<LinkDescription> list = new LinkedList<>();
@@ -236,15 +265,17 @@ public class Router {
     }
     lsa.links = list;
     lsa.linkStateID = rd.simulatedIPAddress;
-
-    for (Link link : ports) {
-      sendLSAToNeighbor(link, lsa);
-    }
+    return lsa;
   }
 
+  /**
+   * Sends HELLOs to all current neighbors and joins threads to ensure completion
+   * of handshakes
+   */
   private void sendHellosToNeighbors() {
     LinkedList<Thread> threads = new LinkedList<>();
     for (Link link : ports) {
+      System.out.println("Creating init handler");
       InitHandler initHandler = new InitHandler(link);
       initHandler.start();
       threads.add(initHandler);
@@ -268,7 +299,7 @@ public class Router {
    * This command does trigger the link database synchronization
    */
   private void processConnect(String processIP, short processPort,
-                              String simulatedIP) {
+      String simulatedIP) {
     if (!started) {
       System.out.println("Need to start router first!");
       return;
@@ -310,7 +341,8 @@ public class Router {
    * disconnect with all neighbors and quit the program
    */
   private void processQuit() {
-
+    // Shouldn't send anything to anybody as it doesn't have any more neighbors.
+    System.exit(0);
   }
 
   private String getCommands() {
@@ -348,6 +380,7 @@ public class Router {
 
         while (!serverSocket.isClosed()) {
           Socket socket = serverSocket.accept();
+          System.out.println("Creating thread from socket :" + socket.getPort());
           new ClientHandler(socket).start();
         }
       } catch (IOException ex) {
@@ -407,6 +440,7 @@ public class Router {
         return;
       }
       printSetState(packet.neighborID, RouterStatus.INIT);
+      System.out.println(Thread.currentThread().getName());
 
       SOSPFPacket hello = SOSPFPacket.createHello(rd.processPortNumber, rd.simulatedIPAddress,
           packet.neighborID, rd.simulatedIPAddress);
@@ -430,15 +464,31 @@ public class Router {
       }
       lsd.syncLinkStateDatabase(packet.lsa);
 
-      // Synchronize on links from LinkDB?????
+      // Check that node doesn't remove us from its neighbors
+      boolean updatedLocalTopology = false;
+      Link removedLink = null;
+      for (Link link : ports) {
+        if (packet.lsa.linkStateID == link.router2.simulatedIPAddress) {
+          Optional<LinkDescription> first = packet.lsa.links.stream().filter(x -> x.linkID == rd.simulatedIPAddress)
+              .findFirst();
+          if (first.isEmpty()) {
+            updatedLocalTopology = ports.removeLink(link.router2.processPortNumber);
+            removedLink = link;
+          }
+        }
+      }
 
-      // Send LSA update to neighbors
+      // Forward to neighbors
       for (Link link : ports) {
         // Don't send to the neighbor that sent the LSA
         if (link.router2.simulatedIPAddress.equals(packet.srcIP)) {
           continue;
         }
-        sendLSAToNeighbor(link);
+        sendLSAToNeighbor(link, packet.lsa);
+      }
+
+      if (updatedLocalTopology) {
+        sendLSAToNeighbors(removedLink);
       }
     }
   }
