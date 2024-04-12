@@ -33,6 +33,14 @@ public class Router {
     rd.simulatedIPAddress = config.getString("socs.network.router.ip");
     rd.processPortNumber = Short.parseShort(config.getString("socs.network.router.port"));
     lsd = new LinkStateDatabase(rd);
+    // Create serverSocket
+    try {
+      serverSocket = new ServerThread(rd.processPortNumber);
+      serverSocket.start();
+    } catch (NumberFormatException e) {
+      e.printStackTrace();
+      System.exit(-1);
+    }
   }
 
   /**
@@ -246,14 +254,6 @@ public class Router {
    * broadcast Hello to neighbors
    */
   private void processStart() {
-    // Create serverSocket
-    try {
-      serverSocket = new ServerThread(rd.processPortNumber);
-      serverSocket.start();
-    } catch (NumberFormatException e) {
-      e.printStackTrace();
-      System.exit(-1);
-    }
 
     sendHellosToNeighbors();
 
