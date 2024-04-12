@@ -54,13 +54,14 @@ public class Router {
     // Add all LSAs from the DB to the packet Vector
     lsaUpdate.lsa = lsa;
 
-    // System.out.println("Sending LSA update to " + link.router2.processIPAddress + " on port "
-    //     + link.router2.processPortNumber);
+    System.out.println("Sending LSA to " + link.router2.processIPAddress + " with process port " + link.router2.processPortNumber);
 
-    try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber)){
+    try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);){
       ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
       out.writeObject(lsaUpdate);
       out.flush();
+      out.close();
+      socket.close();
     } catch (IOException e) {
       System.err.println("Failed to send LSA update to " + link.router2.simulatedIPAddress);
       e.printStackTrace();
@@ -426,7 +427,14 @@ public class Router {
           System.out.println("Received LSA update");
           processLSAUpdate(packet);
         }
+        inFromClient.close();
+        outToClient.close();
         socket.close();
+
+        if (packet.sospfType == 0) {
+          // Send LSA to neighbors
+          sendLSAToNeighbors();
+        }
 
       } catch (IOException | ClassNotFoundException ex) {
         System.err.println("Client exception: " + ex.getMessage());
@@ -482,9 +490,6 @@ public class Router {
         System.exit(1);
       }
       printSetState(packet.neighborID, RouterStatus.TWO_WAY);
-
-      // Send LSA to neighbors
-      sendLSAToNeighbors();
 
     }
 
@@ -569,7 +574,7 @@ public class Router {
 
         out.close();
         in.close();
-
+        socket.close();
       } catch (IOException e) {
         throw new RuntimeException(e);
       } catch (ClassNotFoundException e) {
