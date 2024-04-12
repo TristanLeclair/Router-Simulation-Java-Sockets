@@ -44,7 +44,7 @@ public class LinkDB implements Iterable<Link> {
 
     RouterDescription newRouter = new RouterDescription();
     newRouter.processPortNumber = processPort;
-    newRouter.processIPAddress = processIP;
+    newRouter.processIPAddress = "localhost";
     newRouter.simulatedIPAddress = simulatedIP;
     newRouter.status = RouterStatus.INIT;
 
