@@ -40,7 +40,7 @@ public class LinkDB implements Iterable<Link> {
    * @return true if link was added to DB
    */
   public boolean addLink(String processIP, short processPort, String simulatedIP,
-                         RouterDescription currentRouter) {
+      RouterDescription currentRouter) {
 
     RouterDescription newRouter = new RouterDescription();
     newRouter.processPortNumber = processPort;
@@ -49,7 +49,6 @@ public class LinkDB implements Iterable<Link> {
     newRouter.status = RouterStatus.INIT;
 
     Link newLink = new Link(currentRouter, newRouter);
-    lsaSeqNumber.addAndGet(1);
 
     return addLink(newLink);
   }
@@ -62,8 +61,8 @@ public class LinkDB implements Iterable<Link> {
    * @param link to add to list
    * @return true if link added
    */
-  public boolean addLink(Link link) {
-    if (currentSize >= 4) {
+  private boolean addLink(Link link) {
+    if (!canAddLink()) {
       return false;
     }
 
@@ -73,6 +72,7 @@ public class LinkDB implements Iterable<Link> {
       }
     }
     currentSize++;
+    lsaSeqNumber.addAndGet(1);
     return true;
   }
 
@@ -88,8 +88,22 @@ public class LinkDB implements Iterable<Link> {
         return true;
       }
     }
+    lsaSeqNumber.addAndGet(1);
 
     return false;
+  }
+
+  /**
+   * Remove link by index
+   *
+   * @param index of link (0-_maxSize)
+   * @return Link
+   */
+  public Link removeLinkByIndex(int index) {
+    Link link = _links[index];
+    _links[index] = null;
+    lsaSeqNumber.addAndGet(1);
+    return link;
   }
 
   /**
@@ -97,7 +111,7 @@ public class LinkDB implements Iterable<Link> {
    * @return first link to have port number in list
    */
   public Optional<Link> findLink(short portNumber) {
-    return Arrays.stream(_links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
+    return Arrays.stream(_links).filter(x -> x != null && x.router2.processPortNumber == portNumber).findFirst();
   }
 
   /**
@@ -105,8 +119,7 @@ public class LinkDB implements Iterable<Link> {
    * @return true if link was in DB and successfully changed
    */
   public boolean setLinkToTwoWay(short portNumber) {
-    Optional<Link> first =
-        Arrays.stream(_links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
+    Optional<Link> first = Arrays.stream(_links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
     if (first.isEmpty()) {
       return false;
     }
