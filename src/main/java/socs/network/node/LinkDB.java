@@ -44,37 +44,27 @@ public class LinkDB implements Iterable<Link> {
 
     RouterDescription newRouter = new RouterDescription();
     newRouter.processPortNumber = processPort;
-    newRouter.processIPAddress = processIP;
+    newRouter.processIPAddress = "localhost";
     newRouter.simulatedIPAddress = simulatedIP;
     newRouter.status = RouterStatus.INIT;
 
     Link newLink = new Link(currentRouter, newRouter);
 
-    return addLink(newLink);
-  }
-
-  public boolean canAddLink() {
-    return currentSize < _maxSize;
-  }
-
-  /**
-   * @param link to add to list
-   * @return true if link added
-   */
-  private boolean addLink(Link link) {
-    if (!canAddLink()) {
+    if (!(currentSize < _maxSize)) {
       return false;
     }
 
     for (int i = 0; i < _maxSize; ++i) {
       if (_links[i] == null) {
-        _links[i] = link;
+        _links[i] = newLink;
+        break;
       }
     }
     currentSize++;
     lsaSeqNumber.addAndGet(1);
     return true;
   }
+
 
   /**
    * @param portNumber port of link to remove from list
@@ -100,10 +90,19 @@ public class LinkDB implements Iterable<Link> {
    * @return Link
    */
   public Link removeLinkByIndex(int index) {
-    Link link = _links[index];
+    Link link = getLinkByIndex(index);
     _links[index] = null;
     lsaSeqNumber.addAndGet(1);
     return link;
+  }
+
+  /**
+   * Get link by index
+   * @param index of link (0-_maxSize)
+   * @return
+   */
+  public Link getLinkByIndex(int index) {
+    return _links[index];
   }
 
   /**
@@ -120,7 +119,7 @@ public class LinkDB implements Iterable<Link> {
    */
   public boolean setLinkToTwoWay(short portNumber) {
     Optional<Link> first = Arrays.stream(_links).filter(x -> x.router2.processPortNumber == portNumber).findFirst();
-    if (first.isEmpty()) {
+    if (!first.isPresent()) {
       return false;
     }
 
