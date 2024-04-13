@@ -400,7 +400,7 @@ public class Router {
           // Print out the prompt for the next command
           System.out.println(">>");
         } else if (packet.sospfType == 1) {
-          System.out.println("Received LSA update");
+          // System.out.println("Received LSA update");
           processLSAUpdate(packet);
         }
         inFromClient.close();
@@ -470,7 +470,7 @@ public class Router {
     }
 
     private void processLSAUpdate(SOSPFPacket packet) throws IOException {
-      System.out.println("Received LSA update");
+      // System.out.println("Received LSA update");
       // If the LSA is from the same router, ignore it
       if (rd.simulatedIPAddress.equals(packet.srcIP)) {
         return;
