@@ -3,8 +3,11 @@ package socs.network.node;
 import socs.network.message.LSA;
 import socs.network.message.LinkDescription;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -14,6 +17,7 @@ public class LinkStateDatabase {
   public HashMap<String, LSA> _store = new HashMap<String, LSA>();
 
   private RouterDescription rd = null;
+
 
   public LinkStateDatabase(RouterDescription routerDescription) {
     rd = routerDescription;
@@ -47,28 +51,18 @@ public class LinkStateDatabase {
       }
     }
     // Call Dijkstra's algorithm to find the shortest path
-    Map<String, Integer> distances = dijkstra(rd, destinationRouter);
-
+    Map<String, List<String>> distances = dijkstra(rd, destinationRouter);
+    if (distances.get(destinationRouter.simulatedIPAddress) == null) {
+      return "No path found to destination router.";
+    }
     // Reconstruct the shortest path
     StringBuilder shortestPath = new StringBuilder();
-    // shortestPath.append("Shortest path from ").append(rd.simulatedIPAddress).append(" to ").append(destinationIP).append(": ");
-    String currentRouter = rd.simulatedIPAddress;
-    while (!currentRouter.equals(destinationIP)) {
-        shortestPath.append(currentRouter).append(" -> ");
-        int minDistance = Integer.MAX_VALUE;
-        String nextRouter = null;
-        for (Map.Entry<String, Integer> entry : distances.entrySet()) {
-            if (entry.getKey().equals(currentRouter)) {
-                continue;
-            }
-            if (entry.getValue() < minDistance) {
-                minDistance = entry.getValue();
-                nextRouter = entry.getKey();
-            }
-        }
-        currentRouter = nextRouter;
-    }
-    shortestPath.append(destinationRouter.simulatedIPAddress);
+    
+    distances.get(destinationRouter.simulatedIPAddress).forEach(router -> shortestPath.append(router).append(" -> "));
+    
+    // Remove the last " -> " from the string
+    shortestPath.setLength(shortestPath.length() - 4);
+    
     return shortestPath.toString();
   }
 
@@ -78,11 +72,14 @@ public class LinkStateDatabase {
    * @param destination the destination router
    * @return a map of router IP addresses to the distance from the source router
    */
-  private synchronized Map<String, Integer> dijkstra(RouterDescription source, RouterDescription destination) {
+  private synchronized Map<String, List<String>> dijkstra(RouterDescription source, RouterDescription destination) {
       Map<String, Integer> distances = new HashMap<>();
       Map<String, String> previous = new HashMap<>();
       Set<String> visited = new HashSet<>();
+      Map<String, List<String>> paths = new HashMap<>();
+      
 
+      
       for (LSA lsa : _store.values()) {
           String router = lsa.linkStateID;
           // Check if router is neighbor of source, then we know the distance
@@ -91,6 +88,8 @@ public class LinkStateDatabase {
             if (router.equals(source.simulatedIPAddress)) {
               distances.put(router, 0);
               previous.put(router, null);
+              paths.put(router, new LinkedList<>());
+              paths.get(router).add(router);
             } else {
               distances.put(router, 1);
               previous.put(router, source.simulatedIPAddress);
@@ -101,12 +100,14 @@ public class LinkStateDatabase {
           }
       }
 
-      visited.add(source.simulatedIPAddress);
+
+
+      // visited.add(source.simulatedIPAddress);
 
       // Loop through all routers in the network
       while (visited.size() < _store.size()){
           String current = getMinimumDistanceRouter(distances, visited);
-          
+
           if (current == null) {
               break;
           }
@@ -115,22 +116,28 @@ public class LinkStateDatabase {
 
           for (LSA lsa : _store.values()) {
               if (current.equals(lsa.linkStateID)) {
-                  for (LinkDescription ld : lsa.links) {
-                      String neighbor = null;
-                      neighbor = ld.linkID;
-                      if (!visited.contains(neighbor)) {
-                          int alt = distances.get(current) + 1; // Assuming equal weight for all links
-                          if (alt < distances.get(neighbor)) {
-                              distances.put(neighbor, alt);
-                              previous.put(neighbor, current);
-                          }
-                      }
-                  }
+                
+                for (LinkDescription ld : lsa.links) {
+                    String neighbor = null;
+                    neighbor = ld.linkID;
+                    if (_store.get(neighbor) == null){
+                      continue;
+                    }
+                    if (!visited.contains(neighbor)) {
+                        int alt = distances.get(current) + 1; // Assuming equal weight for all links
+                        if (alt <= distances.get(neighbor)) {
+                            distances.put(neighbor, alt);
+                            previous.put(neighbor, current);
+                            paths.put(neighbor, new LinkedList<>(paths.get(current)));
+                            paths.get(neighbor).add(neighbor);
+                        }
+                    }
+                }
               }
           }
       }
 
-      return distances;
+      return paths;
   }
 
   /**
@@ -172,20 +179,24 @@ public class LinkStateDatabase {
    * If the LSA does not exist, add it to the database
    * 
    * @param lsa The LSA to update the database with
+   * @return true if the LSA was more recent than one in database
    */
-  public void syncLinkStateDatabase(LSA lsa) {
+  public boolean syncLinkStateDatabase(LSA lsa) {
     // Potentially lock on the lsa object instead of the whole store
     synchronized (_store) {
-        if (_store.containsKey(lsa.linkStateID)) {
-            // Update the LSA if the sequence number is larger
-            LSA existingLsa = _store.get(lsa.linkStateID);
-            if (lsa.lsaSeqNumber > existingLsa.lsaSeqNumber) {
-                _store.put(lsa.linkStateID, lsa);
-            }
-        } else {
-            // Add the LSA if it does not exist
-            _store.put(lsa.linkStateID, lsa);
+      if (_store.containsKey(lsa.linkStateID)) {
+        // Update the LSA if the sequence number is larger
+        LSA existingLsa = _store.get(lsa.linkStateID);
+        if (lsa.lsaSeqNumber > existingLsa.lsaSeqNumber) {
+          _store.put(lsa.linkStateID, lsa);
+          return true;
         }
+      } else {
+        // Add the LSA if it does not exist
+        _store.put(lsa.linkStateID, lsa);
+        return true;
+      }
+      return false;
     }
   }
    
