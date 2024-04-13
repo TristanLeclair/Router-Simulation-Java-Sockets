@@ -179,20 +179,24 @@ public class LinkStateDatabase {
    * If the LSA does not exist, add it to the database
    * 
    * @param lsa The LSA to update the database with
+   * @return true if the LSA was more recent than one in database
    */
-  public void syncLinkStateDatabase(LSA lsa) {
+  public boolean syncLinkStateDatabase(LSA lsa) {
     // Potentially lock on the lsa object instead of the whole store
     synchronized (_store) {
-        if (_store.containsKey(lsa.linkStateID)) {
-            // Update the LSA if the sequence number is larger
-            LSA existingLsa = _store.get(lsa.linkStateID);
-            if (lsa.lsaSeqNumber > existingLsa.lsaSeqNumber) {
-                _store.put(lsa.linkStateID, lsa);
-            }
-        } else {
-            // Add the LSA if it does not exist
-            _store.put(lsa.linkStateID, lsa);
+      if (_store.containsKey(lsa.linkStateID)) {
+        // Update the LSA if the sequence number is larger
+        LSA existingLsa = _store.get(lsa.linkStateID);
+        if (lsa.lsaSeqNumber > existingLsa.lsaSeqNumber) {
+          _store.put(lsa.linkStateID, lsa);
+          return true;
         }
+      } else {
+        // Add the LSA if it does not exist
+        _store.put(lsa.linkStateID, lsa);
+        return true;
+      }
+      return false;
     }
   }
    
