@@ -52,7 +52,9 @@ public class LinkStateDatabase {
     }
     // Call Dijkstra's algorithm to find the shortest path
     Map<String, List<String>> distances = dijkstra(rd, destinationRouter);
-
+    if (distances.get(destinationRouter.simulatedIPAddress) == null) {
+      return "No path found to destination router.";
+    }
     // Reconstruct the shortest path
     StringBuilder shortestPath = new StringBuilder();
     
