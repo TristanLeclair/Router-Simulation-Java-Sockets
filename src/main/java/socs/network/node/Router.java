@@ -62,7 +62,7 @@ public class Router {
     // Add all LSAs from the DB to the packet Vector
     lsaUpdate.lsa = lsa;
 
-    System.out.println("Sending LSA to " + link.router2.processIPAddress + " with process port " + link.router2.processPortNumber);
+    // System.out.println("Sending LSA to " + link.router2.processIPAddress + " with process port " + link.router2.processPortNumber);
 
     try (Socket socket = new Socket(link.router2.processIPAddress, link.router2.processPortNumber);){
       ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
@@ -177,6 +177,26 @@ public class Router {
     sendLSAToNeighbors();
     
     ports.removeLinkByIndex(portNumber);
+  }
+
+  /**
+   * disconnect with all neighbors and quit the program
+   */
+  private void processQuit() {
+    
+    LSA lsa = updateLSA(new LinkedList<>());
+    lsd.syncLinkStateDatabase(lsa);
+
+    sendLSAToNeighbors();
+
+    int numPorts = ports.getCurrentSize();
+    for (int i = 0; i < numPorts; i++) {
+      ports.removeLinkByIndex(i);
+    }
+
+
+    // Shouldn't send anything to anybody as it doesn't have any more neighbors.
+    System.exit(0);
   }
 
   /**
@@ -323,14 +343,6 @@ public class Router {
    */
   private void processNeighbors() {
     System.out.println(ports.toString());
-  }
-
-  /**
-   * disconnect with all neighbors and quit the program
-   */
-  private void processQuit() {
-    // Shouldn't send anything to anybody as it doesn't have any more neighbors.
-    System.exit(0);
   }
 
   private String getCommands() {
@@ -485,7 +497,7 @@ public class Router {
           Optional<LinkDescription> first = packet.lsa.links.stream().filter(x -> x.linkID.equals(rd.simulatedIPAddress))
               .findFirst();
           if (!first.isPresent()) {
-            System.out.println("Removing link from " + packet.lsa.linkStateID);
+            // System.out.println("Removing link from " + packet.lsa.linkStateID);
             updatedLocalTopology = ports.removeLink(link.router2.processPortNumber);
 
             // Update LSA with updated links
