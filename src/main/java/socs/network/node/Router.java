@@ -471,7 +471,6 @@ public class Router {
         System.err.println("Failed to receive handshake");
         e.printStackTrace();
       }
-    
 
       if (!ports.setLinkToTwoWay(packet.srcProcessPort)) {
         System.out.println("Error");
@@ -488,13 +487,14 @@ public class Router {
         return;
       }
 
-      lsd.syncLinkStateDatabase(packet.lsa);
+      boolean shouldForward = lsd.syncLinkStateDatabase(packet.lsa);
 
       // Check that node doesn't remove us from its neighbors
       boolean updatedLocalTopology = false;
       for (Link link : ports) {
         if (packet.lsa.linkStateID.equals(link.router2.simulatedIPAddress)) {
-          Optional<LinkDescription> first = packet.lsa.links.stream().filter(x -> x.linkID.equals(rd.simulatedIPAddress))
+          Optional<LinkDescription> first = packet.lsa.links.stream()
+              .filter(x -> x.linkID.equals(rd.simulatedIPAddress))
               .findFirst();
           if (!first.isPresent()) {
             // System.out.println("Removing link from " + packet.lsa.linkStateID);
@@ -506,7 +506,8 @@ public class Router {
               if (l.router2.simulatedIPAddress.equals(packet.lsa.linkStateID)) {
                 continue;
               }
-              LinkDescription linkDescription = new LinkDescription(l.router2.simulatedIPAddress, l.router2.processPortNumber);
+              LinkDescription linkDescription = new LinkDescription(l.router2.simulatedIPAddress,
+                  l.router2.processPortNumber);
               links.add(linkDescription);
             }
             LSA lsa = updateLSA(links);
@@ -515,13 +516,15 @@ public class Router {
         }
       }
 
-      // Forward to neighbors
-      for (Link link : ports) {
-        // Don't send to the neighbor that sent the LSA
-        if (link.router2.simulatedIPAddress.equals(packet.srcIP)) {
-          continue;
+      if (shouldForward) {
+        // Forward to neighbors
+        for (Link link : ports) {
+          // Don't send to the neighbor that sent the LSA
+          if (link.router2.simulatedIPAddress.equals(packet.srcIP)) {
+            continue;
+          }
+          sendLSAToNeighbor(link, packet.lsa);
         }
-        sendLSAToNeighbor(link, packet.lsa);
       }
 
       if (updatedLocalTopology) {
